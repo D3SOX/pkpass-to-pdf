@@ -60,6 +60,10 @@ This creates a standalone `pkpass-to-pdf` binary that can be run without Bun ins
 ./pkpass-to-pdf path/to/your/pass.pkpass
 ```
 
+### Sample Output
+
+You can see how a generated PDF looks like here: [sample-event.pdf](./test/fixtures/sample-event.pdf).
+
 ## Development
 
 ### Project Structure
