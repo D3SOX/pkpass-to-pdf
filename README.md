@@ -111,4 +111,4 @@ The tool extracts all available data and images to create a comprehensive PDF re
 
 ## License
 
-MIT
+[MIT](./LICENSE).
