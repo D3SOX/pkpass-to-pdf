@@ -98,27 +98,21 @@ const samplePassJson = {
   },
 };
 
-// Create a simple 1x1 white PNG for logo placeholder
-function createMinimalPng(): Buffer {
-  // Minimal valid PNG - 1x1 white pixel
-  const pngData = Buffer.from([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
-    0x00, 0x00, 0x00, 0x0d, // IHDR length
-    0x49, 0x48, 0x44, 0x52, // IHDR type
-    0x00, 0x00, 0x00, 0x01, // width: 1
-    0x00, 0x00, 0x00, 0x01, // height: 1
-    0x08, 0x02, // bit depth: 8, color type: 2 (RGB)
-    0x00, 0x00, 0x00, // compression, filter, interlace
-    0x90, 0x77, 0x53, 0xde, // IHDR CRC
-    0x00, 0x00, 0x00, 0x0c, // IDAT length
-    0x49, 0x44, 0x41, 0x54, // IDAT type
-    0x08, 0xd7, 0x63, 0xf8, 0xff, 0xff, 0xff, 0x00, // compressed data
-    0x05, 0xfe, 0x02, 0xfe, // IDAT CRC
-    0x00, 0x00, 0x00, 0x00, // IEND length
-    0x49, 0x45, 0x4e, 0x44, // IEND type
-    0xae, 0x42, 0x60, 0x82, // IEND CRC
-  ]);
-  return pngData;
+import QRCode from "qrcode";
+
+async function createIconPng(): Promise<Buffer> {
+  // Small icon
+  const dataUrl = await QRCode.toDataURL("T", {
+    errorCorrectionLevel: "L",
+    margin: 1,
+    width: 29,
+    color: {
+      dark: "#3C414C",
+      light: "#FFFFFF",
+    },
+  });
+  const base64Data = dataUrl.replace(/^data:image\/png;base64,/, "");
+  return Buffer.from(base64Data, "base64");
 }
 
 async function createFixture(): Promise<void> {
@@ -128,11 +122,13 @@ async function createFixture(): Promise<void> {
   zip.file("pass.json", JSON.stringify(samplePassJson, null, 2));
 
   // Add minimal placeholder images
-  const png = createMinimalPng();
-  zip.file("icon.png", png);
-  zip.file("icon@2x.png", png);
-  zip.file("logo.png", png);
-  zip.file("logo@2x.png", png);
+  const iconPng = await createIconPng();
+  const thumbnailPng = await Bun.file(join(FIXTURE_DIR, "tada.png")).arrayBuffer();
+  
+  zip.file("icon.png", iconPng);
+  zip.file("icon@2x.png", iconPng);
+  zip.file("thumbnail.png", Buffer.from(thumbnailPng));
+  zip.file("thumbnail@2x.png", Buffer.from(thumbnailPng));
 
   // Generate the zip file
   const content = await zip.generateAsync({ type: "nodebuffer" });

@@ -58,8 +58,8 @@ describe("pkpass-to-pdf", () => {
   test("should extract images from pkpass", async () => {
     const pass = await parsePkpass(SAMPLE_PKPASS);
     
-    // Our fixture has logo and icon
-    expect(pass.images.logo).toBeDefined();
+    // Our fixture has thumbnail and icon
+    expect(pass.images.thumbnail).toBeDefined();
     expect(pass.images.icon).toBeDefined();
   });
 
