@@ -1,0 +1,30 @@
+{
+  "name": "pkpass-to-pdf",
+  "version": "1.0.0",
+  "module": "src/cli.ts",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "pkpass-to-pdf": "src/cli.ts"
+  },
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "build": "bun build src/cli.ts --compile --outfile pkpass-to-pdf",
+    "test": "bun test",
+    "create-fixture": "bun run test/create-fixture.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/prompts": "^2.4.9",
+    "@types/qrcode": "^1.5.6"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "pdf-lib": "^1.17.1",
+    "prompts": "^2.4.2",
+    "qrcode": "^1.5.4"
+  }
+}
