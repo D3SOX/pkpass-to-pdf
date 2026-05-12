@@ -3,8 +3,10 @@
  */
 
 import { PDFDocument, rgb, StandardFonts, PDFPage, PDFFont, PDFImage } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import QRCode from "qrcode";
 import type { ParsedPass, PassField, PassBarcode } from "./types.ts";
+import { existsSync, readFileSync } from "fs";
 
 // Page dimensions (standard letter-ish, portrait)
 const PAGE_WIDTH = 400;
@@ -46,6 +48,49 @@ function parseColor(colorStr: string | undefined, fallback: ReturnType<typeof rg
   }
 
   return fallback;
+}
+
+// Common paths where Unicode-capable fonts may be found across platforms
+const UNICODE_FONT_CANDIDATES = [
+  // Linux (DejaVu)
+  ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"],
+  // Linux (Noto)
+  ["/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"],
+  // Linux (Liberation)
+  ["/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"],
+  // macOS
+  ["/System/Library/Fonts/Supplemental/Arial Unicode MS.ttf", "/System/Library/Fonts/Supplemental/Arial Unicode MS.ttf"],
+  // Windows
+  ["C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"],
+];
+
+function findUnicodeFontPaths(): [string, string] | null {
+  for (const pair of UNICODE_FONT_CANDIDATES) {
+    const [regular, bold] = pair as [string, string];
+    if (existsSync(regular) && existsSync(bold)) {
+      return [regular, bold];
+    }
+  }
+  return null;
+}
+
+// Characters that don't decompose via NFD and need explicit ASCII substitutions
+const CHAR_SUBSTITUTIONS: Record<string, string> = {
+  ł: "l", Ł: "L", ø: "o", Ø: "O", ð: "d", Ð: "D", þ: "th", Þ: "Th",
+  æ: "ae", Æ: "AE", œ: "oe", Œ: "OE", ß: "ss", ĸ: "k", ŋ: "n", ı: "i",
+  ĳ: "ij", Ĳ: "IJ", ƒ: "f", ŉ: "n", ſ: "s",
+};
+
+function sanitizeForWinAnsi(text: string): string {
+  return text
+    .split("")
+    .map((ch) => CHAR_SUBSTITUTIONS[ch] ?? ch)
+    .join("")
+    // NFD decomposition removes combining diacritical marks (é → e, ü → u, etc.)
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    // Drop any remaining non-WinAnsi characters (outside latin-1 range)
+    .replace(/[^\x00-\xFF]/g, "?");
 }
 
 /**
@@ -120,6 +165,7 @@ function drawFieldSection(
   boldFont: PDFFont,
   fgColor: ReturnType<typeof rgb>,
   labelColor: ReturnType<typeof rgb>,
+  sanitize: (t: string) => string,
   options: { columns?: number; labelSize?: number; valueSize?: number } = {}
 ): number {
   if (fields.length === 0) return yPosition;
@@ -135,7 +181,7 @@ function drawFieldSection(
 
     // Draw label
     if (field.label) {
-      page.drawText(field.label.toUpperCase(), {
+      page.drawText(sanitize(field.label.toUpperCase()), {
         x,
         y,
         size: labelSize,
@@ -145,7 +191,7 @@ function drawFieldSection(
     }
 
     // Draw value (with proper spacing below label)
-    const valueText = formatFieldValue(field);
+    const valueText = sanitize(formatFieldValue(field));
     const labelValueGap = field.label ? labelSize + 6 : 0;
     page.drawText(valueText, {
       x,
@@ -184,9 +230,22 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
 
-  // Load fonts
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  // Load fonts — prefer Unicode-capable system fonts, fall back to WinAnsi standard fonts
+  let font: PDFFont;
+  let boldFont: PDFFont;
+  let usesSanitization = false;
+  const unicodePaths = findUnicodeFontPaths();
+  if (unicodePaths) {
+    pdfDoc.registerFontkit(fontkit);
+    font = await pdfDoc.embedFont(readFileSync(unicodePaths[0]));
+    boldFont = await pdfDoc.embedFont(readFileSync(unicodePaths[1]));
+  } else {
+    font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    usesSanitization = true;
+  }
+
+  const sanitize = usesSanitization ? sanitizeForWinAnsi : (t: string) => t;
 
   // Parse colors
   const bgColor = parseColor(pass.backgroundColor, DEFAULT_BG_COLOR);
@@ -230,7 +289,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
 
     // Draw logo text next to logo if present
     if (pass.logoText) {
-      page.drawText(pass.logoText, {
+      page.drawText(sanitize(pass.logoText), {
         x: MARGIN + logoWidth + 10,
         y: y - 20,
         size: 14,
@@ -240,7 +299,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
     }
   } else if (pass.logoText) {
     // Just logo text, no image
-    page.drawText(pass.logoText, {
+    page.drawText(sanitize(pass.logoText), {
       x: MARGIN,
       y: y - 20,
       size: 14,
@@ -249,7 +308,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
     });
   } else {
     // Use organization name as fallback header
-    page.drawText(pass.organizationName, {
+    page.drawText(sanitize(pass.organizationName), {
       x: MARGIN,
       y: y - 20,
       size: 14,
@@ -281,7 +340,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
 
   // Header fields (if any)
   if (pass.headerFields.length > 0) {
-    y = drawFieldSection(page, pass.headerFields, y, font, boldFont, fgColor, labelColor, {
+    y = drawFieldSection(page, pass.headerFields, y, font, boldFont, fgColor, labelColor, sanitize, {
       columns: Math.min(pass.headerFields.length, 3),
       labelSize: 7,
       valueSize: 10,
@@ -309,7 +368,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
   }
 
   // === DESCRIPTION / TITLE ===
-  page.drawText(pass.description, {
+  page.drawText(sanitize(pass.description), {
     x: MARGIN,
     y,
     size: 18,
@@ -335,7 +394,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
 
   // === PRIMARY FIELDS ===
   if (pass.primaryFields.length > 0) {
-    y = drawFieldSection(page, pass.primaryFields, y, font, boldFont, fgColor, labelColor, {
+    y = drawFieldSection(page, pass.primaryFields, y, font, boldFont, fgColor, labelColor, sanitize, {
       columns: Math.min(pass.primaryFields.length, 2),
       labelSize: 9,
       valueSize: 16,
@@ -345,7 +404,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
 
   // === SECONDARY FIELDS ===
   if (pass.secondaryFields.length > 0) {
-    y = drawFieldSection(page, pass.secondaryFields, y, font, boldFont, fgColor, labelColor, {
+    y = drawFieldSection(page, pass.secondaryFields, y, font, boldFont, fgColor, labelColor, sanitize, {
       columns: Math.min(pass.secondaryFields.length, 3),
     });
   }
@@ -354,7 +413,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
   if (pass.auxiliaryFields.length > 0) {
     drawSeparator(page, y, labelColor);
     y -= 15;
-    y = drawFieldSection(page, pass.auxiliaryFields, y, font, boldFont, fgColor, labelColor, {
+    y = drawFieldSection(page, pass.auxiliaryFields, y, font, boldFont, fgColor, labelColor, sanitize, {
       columns: Math.min(pass.auxiliaryFields.length, 3),
     });
   }
@@ -392,7 +451,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
 
     // Alt text if present
     if (pass.barcode.altText) {
-      const altText = pass.barcode.altText;
+      const altText = sanitize(pass.barcode.altText);
       page.drawText(altText, {
         x: (PAGE_WIDTH - font.widthOfTextAtSize(altText, 10)) / 2,
         y,
@@ -432,7 +491,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
         if (y < 50) break; // Prevent overflow
 
         if (field.label) {
-          newPage.drawText(field.label, {
+          newPage.drawText(sanitize(field.label), {
             x: MARGIN,
             y,
             size: 9,
@@ -444,7 +503,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
 
         const valueText = formatFieldValue(field);
         // Word wrap for long text
-        const lines = wrapText(valueText, font, 10, CONTENT_WIDTH);
+        const lines = wrapText(valueText, font, 10, CONTENT_WIDTH, sanitize);
         for (const line of lines) {
           if (y < 50) break;
           newPage.drawText(line, {
@@ -475,7 +534,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
         if (y < 50) break;
 
         if (field.label) {
-          page.drawText(field.label, {
+          page.drawText(sanitize(field.label), {
             x: MARGIN,
             y,
             size: 8,
@@ -486,7 +545,7 @@ export async function generatePdf(pass: ParsedPass, outputPath: string): Promise
         }
 
         const valueText = formatFieldValue(field);
-        const lines = wrapText(valueText, font, 9, CONTENT_WIDTH);
+        const lines = wrapText(valueText, font, 9, CONTENT_WIDTH, sanitize);
         for (const line of lines.slice(0, 3)) { // Limit lines
           if (y < 50) break;
           page.drawText(line, {
@@ -568,14 +627,14 @@ function formatPassStyle(style: string, transitType?: string): string {
 /**
  * Simple word wrapping for text
  */
-function wrapText(text: string, font: PDFFont, fontSize: number, maxWidth: number): string[] {
+function wrapText(text: string, font: PDFFont, fontSize: number, maxWidth: number, sanitize: (t: string) => string): string[] {
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let currentLine = "";
 
   for (const word of words) {
     const testLine = currentLine ? `${currentLine} ${word}` : word;
-    const width = font.widthOfTextAtSize(testLine, fontSize);
+    const width = font.widthOfTextAtSize(sanitize(testLine), fontSize);
 
     if (width <= maxWidth) {
       currentLine = testLine;
@@ -586,6 +645,6 @@ function wrapText(text: string, font: PDFFont, fontSize: number, maxWidth: numbe
   }
 
   if (currentLine) lines.push(currentLine);
-  return lines;
+  return lines.map(sanitize);
 }
 

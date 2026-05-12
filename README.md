@@ -19,6 +19,7 @@ Built with [Bun](https://bun.sh) and TypeScript.
   - Back fields (additional information)
   - Pass metadata (serial number, relevant date)
 - Supports all pass types: boarding passes, event tickets, coupons, store cards, generic passes
+- Support Polish characters (might other as well)
 
 ## Installation
 
