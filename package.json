@@ -14,7 +14,7 @@
     "create-fixture": "bun run test/create-fixture.ts"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.14",
+    "@types/bun": "^1.4.0",
     "@types/prompts": "^2.4.9",
     "@types/qrcode": "^1.5.6"
   },
